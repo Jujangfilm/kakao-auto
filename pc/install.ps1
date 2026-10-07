@@ -24,8 +24,16 @@ try {
     Authorization = "Bearer $token"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28'
   } | Out-Null
 } catch {
+  $code = 0
+  if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+  $why = switch ($code) {
+    401 { '토큰 값이 올바르지 않아요. 복사가 덜 됐거나 다른 내용이 붙여넣어졌을 수 있어요.' }
+    403 { '토큰에 Variables(Read and write) 권한이 없어요.' }
+    404 { '토큰이 kakao-auto 저장소에 접근할 수 없어요. Repository access에서 kakao-auto를 선택했는지 확인해 주세요.' }
+    default { '인터넷 연결 또는 기타 문제예요.' }
+  }
   Write-Host ''
-  Write-Host '토큰 확인 실패: kakao-auto 저장소 접근 권한과 Variables(Read and write) 권한이 있는지 확인해 주세요.' -ForegroundColor Red
+  Write-Host "토큰 확인 실패 (코드 $code): $why" -ForegroundColor Red
   Write-Host $_.Exception.Message
   exit 1
 }

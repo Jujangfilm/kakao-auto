@@ -13,11 +13,16 @@ $Utf8 = New-Object System.Text.UTF8Encoding $false
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 
 # ---------- 1. GitHub 토큰 ----------
+# 붙여넣기(Ctrl+V)는 숨김 입력에서 제어 문자로 들어갈 수 있어서, 클립보드에서 직접 읽는다
 Write-Host ''
-$sec = Read-Host 'GitHub 토큰을 붙여넣고 Enter (입력해도 화면에 보이지 않아요)' -AsSecureString
-$token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
-  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)).Trim()
-if (-not $token) { throw '토큰이 비어 있어요. 다시 실행해 주세요.' }
+Read-Host 'GitHub 토큰을 복사(Ctrl+C)해 둔 상태에서 Enter를 누르세요' | Out-Null
+$token = "$(Get-Clipboard -Raw)" -replace '[\s\x00-\x1F\x7F]', ''
+if ($token -notmatch '^(github_pat_|ghp_)\w+$') {
+  Write-Host ''
+  Write-Host '클립보드에 GitHub 토큰이 없어요. 토큰을 다시 복사(Ctrl+C)한 뒤 이 스크립트를 다시 실행해 주세요.' -ForegroundColor Red
+  Write-Host '(토큰은 github_pat_ 으로 시작해요)'
+  exit 1
+}
 
 try {
   Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/actions/variables" -TimeoutSec 15 -Headers @{
@@ -38,6 +43,7 @@ try {
   exit 1
 }
 [IO.File]::WriteAllText((Join-Path $Dir 'gh-token.txt'), $token, $Utf8)
+try { Set-Clipboard -Value ' ' } catch {}  # 클립보드에 토큰이 남지 않게 비움
 Write-Host '토큰 확인 및 저장 완료' -ForegroundColor Green
 
 # ---------- 2. 상태줄 스크립트 ----------

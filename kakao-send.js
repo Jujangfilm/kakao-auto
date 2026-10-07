@@ -1,6 +1,7 @@
 const { execFileSync } = require('child_process');
 
 const REST_KEY = process.env.KAKAO_REST_API_KEY;
+const CLIENT_SECRET = (process.env.KAKAO_CLIENT_SECRET || '').trim();
 const REFRESH = process.env.KAKAO_REFRESH_TOKEN;
 const GH_PAT = process.env.GH_PAT;
 const REPO = process.env.GITHUB_REPOSITORY;
@@ -10,14 +11,18 @@ const MESSAGE = `자동 발송 테스트예요 🎉\n${now}`;
 
 async function main() {
   // 1. access_token 갱신 (refresh_token 사용)
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: REST_KEY,
+    refresh_token: REFRESH,
+  });
+  // 클라이언트 시크릿이 ON인 앱은 client_secret이 없으면 KOE010 오류
+  if (CLIENT_SECRET) body.append('client_secret', CLIENT_SECRET);
+
   const tokenRes = await fetch('https://kauth.kakao.com/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: REST_KEY,
-      refresh_token: REFRESH,
-    }),
+    body,
   });
   const tokenData = await tokenRes.json();
   if (!tokenRes.ok) {

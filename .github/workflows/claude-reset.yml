@@ -1,18 +1,17 @@
-name: 카카오 토큰 유지
+name: 클로드 초기화 알림
 
 on:
   schedule:
-    - cron: '7 0 * * 1'   # 매주 월요일 09:07 (한국시간), 메시지 없이 토큰만 갱신
+    - cron: '*/15 * * * *'   # 15분마다 확인 (알릴 게 없으면 작업을 건너뛰어 사용 시간이 들지 않음)
   workflow_dispatch:
-    inputs:
-      message:
-        description: '보낼 테스트 메시지 (비워두면 토큰만 갱신)'
-        required: false
-        default: ''
 
 jobs:
-  refresh:
+  notify:
+    # PC가 올린 초기화 시각이 있고, 아직 알리지 않았을 때만 실행
+    if: vars.CLAUDE_RESET_AT != '' && vars.CLAUDE_RESET_AT != vars.CLAUDE_RESET_SENT
     runs-on: ubuntu-latest
+    concurrency:
+      group: claude-reset
     steps:
       - uses: actions/checkout@v4
 
@@ -20,12 +19,11 @@ jobs:
         with:
           node-version: '22'
 
-      - name: 토큰 갱신
+      - name: 초기화 시각 확인 및 알림
         env:
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
           KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          KAKAO_MESSAGE: ${{ inputs.message }}
-        run: node kakao-send.js
+        run: node claude-reset-check.js

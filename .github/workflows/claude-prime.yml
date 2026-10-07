@@ -1,0 +1,55 @@
+name: 클로드 초기화 알림
+
+# 5시간 사용량이 초기화되는 시각에 Haiku로 짧은 메시지를 보내 새 창을 시작하고, 카카오톡으로 알린다.
+# 시간대(UTC 시)마다 예약 줄이 있고, 다음 초기화 시각이 있는 시간대의 줄만 실제로 실행된다.
+# 나머지 시간에는 작업을 건너뛰어 GitHub Actions 사용 시간이 들지 않는다.
+on:
+  schedule:
+    - cron: '17 3 * * *'   # 안전장치: 하루 한 번(한국시간 12:17) 놓친 초기화가 없는지 확인
+    - cron: '*/10 0 * * *'
+    - cron: '*/10 1 * * *'
+    - cron: '*/10 2 * * *'
+    - cron: '*/10 3 * * *'
+    - cron: '*/10 4 * * *'
+    - cron: '*/10 5 * * *'
+    - cron: '*/10 6 * * *'
+    - cron: '*/10 7 * * *'
+    - cron: '*/10 8 * * *'
+    - cron: '*/10 9 * * *'
+    - cron: '*/10 10 * * *'
+    - cron: '*/10 11 * * *'
+    - cron: '*/10 12 * * *'
+    - cron: '*/10 13 * * *'
+    - cron: '*/10 14 * * *'
+    - cron: '*/10 15 * * *'
+    - cron: '*/10 16 * * *'
+    - cron: '*/10 17 * * *'
+    - cron: '*/10 18 * * *'
+    - cron: '*/10 19 * * *'
+    - cron: '*/10 20 * * *'
+    - cron: '*/10 21 * * *'
+    - cron: '*/10 22 * * *'
+    - cron: '*/10 23 * * *'
+  workflow_dispatch:
+
+jobs:
+  prime:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.schedule == '17 3 * * *' ||
+      contains(vars.CLAUDE_NEXT_CRONS, format('|{0}|', github.event.schedule))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: claude-prime
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 초기화 확인, Haiku 메시지, 카카오톡 알림
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node claude-prime.js

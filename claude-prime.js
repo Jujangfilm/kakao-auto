@@ -86,6 +86,10 @@ function askHaiku(bin) {
   const result = events.find((e) => e.type === 'result');
   const limits = events.filter((e) => e.type === 'rate_limit_event').map((e) => e.rate_limit_info || {});
   console.log('사용량 정보:', JSON.stringify(limits));
+  if (result) {
+    // 실제로 쓴 모델과 토큰 수 (모델별)
+    console.log('사용 모델/토큰:', JSON.stringify(result.modelUsage || result.usage || {}));
+  }
   return { result, limits };
 }
 
@@ -103,7 +107,7 @@ async function main() {
   const manual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
   const resetAt = Number(readVar('CLAUDE_RESET_AT')) || 0;
 
-  if (!manual && resetAt) {
+  if (!manual && resetAt && process.env.TEST_ONLY !== 'true') {
     const wait = resetAt * 1000 + AFTER_RESET_MS - Date.now();
     if (wait > WAIT_AHEAD_MS) {
       return console.log(`초기화까지 ${Math.round(wait / 60000)}분 남음 (${fmt(resetAt)})`);
@@ -118,6 +122,10 @@ async function main() {
 
   const bin = installClaude();
   const { result, limits } = askHaiku(bin);
+  if (process.env.TEST_ONLY === 'true') {
+    // 시험 모드: 모델과 토큰 수만 확인하고 카톡/예약은 건드리지 않는다
+    return console.log('시험 모드 답:', result && result.result);
+  }
   const rejected = limits.find((i) => i.status === 'rejected' && i.resetsAt);
 
   if (!result || result.is_error) {

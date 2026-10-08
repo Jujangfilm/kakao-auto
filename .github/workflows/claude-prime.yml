@@ -5,7 +5,7 @@ name: 클로드 초기화 알림
 # 나머지 시간에는 작업을 건너뛰어 GitHub Actions 사용 시간이 들지 않는다.
 on:
   schedule:
-    - cron: '17 3 * * *'   # 안전장치: 하루 한 번(한국시간 12:17) 놓친 초기화가 없는지 확인
+    - cron: '17 3 * * *'   # 안전장치: 하루 한 번(한국시간 낮 12시쯤) 놓친 초기화가 없는지 확인
     - cron: '*/10 0 * * *'
     - cron: '*/10 1 * * *'
     - cron: '*/10 2 * * *'
@@ -36,7 +36,7 @@ jobs:
   prime:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.schedule == '17 3 * * *' ||
+      !contains(github.event.schedule, '*/10') ||
       contains(vars.CLAUDE_NEXT_CRONS, format('|{0}|', github.event.schedule))
     runs-on: ubuntu-latest
     concurrency:

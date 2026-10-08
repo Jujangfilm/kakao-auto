@@ -1,6 +1,7 @@
 // 클로드 5시간 사용량이 초기화되면, 가장 저렴한 모델(Haiku)에 짧은 메시지를 보내 새 5시간 창을 바로 시작하고
 // Haiku의 답을 카카오톡 "나와의 채팅"으로 보낸다.
-// 다음 초기화 시각은 CLAUDE_RESET_AT 변수에, 그 시각에 맞춰 실행될 예약(cron) 줄은 CLAUDE_NEXT_CRONS에 저장한다.
+// 다음 초기화 시각은 CLAUDE_RESET_AT 변수에 저장하고, 공개 저장소에서는 다음 실행을 스스로 이어 붙여
+// 그 시각까지 기다렸다가 정시에 보낸다 (GitHub 예약 실행은 자주 건너뛰어서 믿을 수 없다).
 const { execSync, execFileSync } = require('child_process');
 const os = require('os');
 const path = require('path');
@@ -10,8 +11,10 @@ const FALLBACK_MESSAGE = '클로드 5시간 사용이 초기화 되었습니다'
 const PROMPT = `다음 문장만 그대로 답해: ${FALLBACK_MESSAGE}`;
 const SYSTEM = 'You relay notifications. Reply with exactly the sentence the user gives, nothing else.';
 const FIVE_HOURS = 5 * 60 * 60;
-// 예약 실행은 10분 간격이라, 이 안에 초기화 시각이 있으면 기다렸다가 정시에 보낸다
+// 비공개 저장소는 기다리는 시간도 사용 시간으로 잡혀서, 이 이상은 기다리지 않는다
 const WAIT_AHEAD_MS = 11 * 60 * 1000;
+// 작업 하나는 최대 6시간까지만 돌 수 있어, 그보다 짧게 기다리고 다음 실행으로 넘긴다
+const MAX_WAIT_MS = 340 * 60 * 1000;
 // 초기화 직후 바로 보내면 아직 이전 창으로 잡힐 수 있어 조금 여유를 둔다
 const AFTER_RESET_MS = 60 * 1000;
 
@@ -29,14 +32,33 @@ function readVar(name) {
   }
 }
 
-// 다음 초기화 시각을 저장하고, 그 시간대(UTC 시)와 다음 시간대의 예약 줄만 실행되게 한다.
-// (워크플로의 cron 줄과 글자가 똑같아야 한다)
 function saveNextReset(resetAt) {
-  const h = new Date(resetAt * 1000).getUTCHours();
-  const crons = [h, (h + 1) % 24].map((x) => `*/10 ${x} * * *`);
   gh(['variable', 'set', 'CLAUDE_RESET_AT', '--body', String(resetAt)]);
-  gh(['variable', 'set', 'CLAUDE_NEXT_CRONS', '--body', `|${crons.join('|')}|`]);
   console.log('다음 초기화 예정:', fmt(resetAt));
+}
+
+// 워크플로 자체 토큰(GITHUB_TOKEN)으로 gh 실행
+function ghSelf(args) {
+  return execFileSync('gh', args, {
+    env: { ...process.env, GH_TOKEN: process.env.GITHUB_TOKEN },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
+
+function isPublicRepo() {
+  try {
+    return ghSelf(['api', `repos/${process.env.GITHUB_REPOSITORY}`, '--jq', '.private']) === 'false';
+  } catch (e) {
+    console.log('저장소 공개 여부 확인 실패, 비공개로 간주:', e.message);
+    return false;
+  }
+}
+
+// 다음 실행을 바로 이어 붙인다. 그 실행이 다음 초기화 시각까지 기다린다
+function chainNext() {
+  ghSelf(['workflow', 'run', 'claude-prime.yml', '--repo', process.env.GITHUB_REPOSITORY, '--ref', 'main']);
+  console.log('다음 실행을 이어 붙였어요');
 }
 
 function installClaude() {
@@ -104,47 +126,51 @@ function fiveHourReset(limits) {
 }
 
 async function main() {
-  const manual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
-  const resetAt = Number(readVar('CLAUDE_RESET_AT')) || 0;
-
-  if (!manual && resetAt && process.env.TEST_ONLY !== 'true') {
-    const wait = resetAt * 1000 + AFTER_RESET_MS - Date.now();
-    if (wait > WAIT_AHEAD_MS) {
-      return console.log(`초기화까지 ${Math.round(wait / 60000)}분 남음 (${fmt(resetAt)})`);
-    }
-    if (wait > 0) {
-      console.log(`${Math.round(wait / 1000)}초 기다렸다가 보냄 (${fmt(resetAt)})`);
-      await sleep(wait);
-    }
-    // 기다리는 동안 다른 실행이 이미 처리했으면 그만둔다
-    if (Number(readVar('CLAUDE_RESET_AT')) !== resetAt) return console.log('이미 처리됨');
-  }
-
-  const bin = installClaude();
-  const { result, limits } = askHaiku(bin);
   if (process.env.TEST_ONLY === 'true') {
-    // 시험 모드: 모델과 토큰 수만 확인하고 카톡/예약은 건드리지 않는다
+    // 시험 모드: 모델과 토큰 수만 확인하고 카톡/변수는 건드리지 않는다
+    const { result } = askHaiku(installClaude());
     return console.log('시험 모드 답:', result && result.result);
   }
+
+  const isPublic = isPublicRepo();
+  const resetAt = Number(readVar('CLAUDE_RESET_AT')) || 0;
+
+  if (process.env.SEND_NOW !== 'true' && resetAt) {
+    const wait = resetAt * 1000 + AFTER_RESET_MS - Date.now();
+    if (wait > 0) {
+      if (!isPublic && wait > WAIT_AHEAD_MS) {
+        return console.log(`비공개 저장소라 오래 기다리지 않아요. 초기화까지 ${Math.round(wait / 60000)}분 (${fmt(resetAt)})`);
+      }
+      if (wait > MAX_WAIT_MS) {
+        console.log(`초기화가 아직 멀어요 (${fmt(resetAt)}). 기다렸다가 다음 실행으로 넘겨요.`);
+        await sleep(MAX_WAIT_MS);
+        return chainNext();
+      }
+      console.log(`${Math.round(wait / 60000)}분 기다렸다가 보내요 (${fmt(resetAt)})`);
+      await sleep(wait);
+    }
+  }
+
+  const { result, limits } = askHaiku(installClaude());
   const rejected = limits.find((i) => i.status === 'rejected' && i.resetsAt);
 
   if (!result || result.is_error) {
-    if (rejected) {
-      // 아직 초기화 전이었다: 알려준 시각에 다시 시도
-      console.log('아직 한도 상태예요. 초기화 시각에 다시 시도해요.');
-      return saveNextReset(toSec(rejected.resetsAt));
-    }
-    throw new Error('Claude 응답 실패: ' + JSON.stringify(result || {}));
+    if (!rejected) throw new Error('Claude 응답 실패: ' + JSON.stringify(result || {}));
+    // 아직 초기화 전이었다: 알려준 시각에 다시 시도
+    console.log('아직 한도 상태예요. 초기화 시각에 다시 시도해요.');
+    saveNextReset(toSec(rejected.resetsAt));
+  } else {
+    const text = (result.result || '').trim() || FALLBACK_MESSAGE;
+    const accessToken = await getAccessToken();
+    await sendToMe(accessToken, text);
+
+    // 5시간 창 정보가 없으면, 방금 보낸 메시지로 창이 시작됐다고 보고 5시간 뒤로 잡는다
+    let next = fiveHourReset(limits);
+    if (!next || next <= nowSec()) next = nowSec() + FIVE_HOURS;
+    saveNextReset(next);
   }
 
-  const text = (result.result || '').trim() || FALLBACK_MESSAGE;
-  const accessToken = await getAccessToken();
-  await sendToMe(accessToken, text);
-
-  // 5시간 창 정보가 없으면, 방금 보낸 메시지로 창이 시작됐다고 보고 5시간 뒤로 잡는다
-  let next = fiveHourReset(limits);
-  if (!next || next <= nowSec()) next = nowSec() + FIVE_HOURS;
-  saveNextReset(next);
+  if (isPublic) chainNext();
 }
 
 main().catch((e) => {

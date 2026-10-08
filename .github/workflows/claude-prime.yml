@@ -1,61 +1,45 @@
 name: 클로드 초기화 알림
 
 # 5시간 사용량이 초기화되는 시각에 Haiku로 짧은 메시지를 보내 새 창을 시작하고, 카카오톡으로 알린다.
-# 시간대(UTC 시)마다 예약 줄이 있고, 다음 초기화 시각이 있는 시간대의 줄만 실제로 실행된다.
-# 나머지 시간에는 작업을 건너뛰어 GitHub Actions 사용 시간이 들지 않는다.
+# 공개 저장소에서는 실행 하나가 다음 초기화 시각까지 기다렸다가 보내고, 다음 실행을 스스로 이어 붙인다.
+# 아래 예약 실행은 그 이어 붙이기가 끊겼을 때 다시 시작하기 위한 안전장치다.
 on:
   schedule:
-    - cron: '17 3 * * *'   # 안전장치: 하루 한 번(한국시간 낮 12시쯤) 놓친 초기화가 없는지 확인
-    - cron: '*/10 0 * * *'
-    - cron: '*/10 1 * * *'
-    - cron: '*/10 2 * * *'
-    - cron: '*/10 3 * * *'
-    - cron: '*/10 4 * * *'
-    - cron: '*/10 5 * * *'
-    - cron: '*/10 6 * * *'
-    - cron: '*/10 7 * * *'
-    - cron: '*/10 8 * * *'
-    - cron: '*/10 9 * * *'
-    - cron: '*/10 10 * * *'
-    - cron: '*/10 11 * * *'
-    - cron: '*/10 12 * * *'
-    - cron: '*/10 13 * * *'
-    - cron: '*/10 14 * * *'
-    - cron: '*/10 15 * * *'
-    - cron: '*/10 16 * * *'
-    - cron: '*/10 17 * * *'
-    - cron: '*/10 18 * * *'
-    - cron: '*/10 19 * * *'
-    - cron: '*/10 20 * * *'
-    - cron: '*/10 21 * * *'
-    - cron: '*/10 22 * * *'
-    - cron: '*/10 23 * * *'
+    - cron: '23 */3 * * *'
   workflow_dispatch:
     inputs:
+      send_now:
+        description: '초기화 시각을 기다리지 않고 지금 바로 보내기'
+        type: boolean
+        default: false
       test_only:
         description: '시험 모드 (카톡 없이 모델과 토큰 수만 확인)'
         type: boolean
         default: false
 
+permissions:
+  actions: write   # 다음 실행을 이어 붙이기 위해
+  contents: read
+
 jobs:
   prime:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      !contains(github.event.schedule, '*/10') ||
-      contains(vars.CLAUDE_NEXT_CRONS, format('|{0}|', github.event.schedule))
     runs-on: ubuntu-latest
+    timeout-minutes: 355
+    # 한 번에 하나만 돌고, 대기 중인 실행은 가장 최근 것 하나만 남는다
     concurrency:
       group: claude-prime
     steps:
       - uses: actions/checkout@v4
 
-      - name: 초기화 확인, Haiku 메시지, 카카오톡 알림
+      - name: 초기화 시각까지 기다렸다가 Haiku 메시지, 카카오톡 알림
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
           KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          SEND_NOW: ${{ inputs.send_now }}
           TEST_ONLY: ${{ inputs.test_only }}
         run: node claude-prime.js
